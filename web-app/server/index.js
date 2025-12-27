@@ -138,6 +138,24 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+const NEIL_THESAURUS = {
+  'jorge': ['jorge', 'george'],
+  'george': ['jorge', 'george']
+};
+
+function expandQuery(query) {
+  const words = query.toLowerCase().split(/\s+/);
+  const expandedParts = words.map(word => {
+    // Basic match for exact word from thesaurus
+    const cleanWord = word.replace(/[^\w]/g, '');
+    if (NEIL_THESAURUS[cleanWord]) {
+      return `(${NEIL_THESAURUS[cleanWord].join(' OR ')})`;
+    }
+    return word;
+  });
+  return expandedParts.join(' ');
+}
+
 app.get('/api/search', (req, res) => {
   const query = req.query.q;
   const yearsParam = req.query.years;
@@ -146,7 +164,8 @@ app.get('/api/search', (req, res) => {
   if (!query) return res.json([]);
 
   try {
-    const sanitizedQuery = query.replace(/"/g, ''); 
+    const expandedQuery = expandQuery(query);
+    console.log(`Original: "${query}" -> Expanded: "${expandedQuery}"`);
     
     let sql = `
       SELECT t.id, t.file, t.line, t.date, t.text_content, 
@@ -157,7 +176,7 @@ app.get('/api/search', (req, res) => {
       WHERE t.transcripts_fts MATCH ? 
     `;
     
-    const params = [sanitizedQuery]; 
+    const params = [expandedQuery]; 
     
     if (yearsParam) {
        const years = yearsParam.split(',');

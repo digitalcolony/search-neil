@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './index.css';
-import { Radio, Search, Calendar, X, Youtube } from 'lucide-react';
+import { Radio, Search, Calendar, X, Youtube, Play } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const API_URL = 'http://localhost:3001/api/search';
@@ -115,13 +115,77 @@ function App() {
     };
   }, [query, selectedYears, retryTick]);
 
-  // Highlighter helper
-  const highlightText = (text, highlight) => {
-    if (!highlight) return text;
-    const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
-    return parts.map((part, i) => 
-      part.toLowerCase() === highlight.toLowerCase() ? <span key={i} className="highlight">{part}</span> : part
-    );
+  // Helper: Convert HH:MM:SS.ms to seconds
+  const tsToSec = (ts) => {
+    const parts = ts.split(':').map(parseFloat);
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return parts[0] || 0;
+  };
+
+  const NEIL_THESAURUS = {
+    'jorge': ['jorge', 'george'],
+    'george': ['jorge', 'george']
+  };
+
+  // Highlighter helper with Deep Linking
+  const highlightText = (text, highlight, youtubeUrl) => {
+    if (!highlight.trim()) return text;
+    const lines = text.split('\n');
+    
+    // Expand highlight terms using thesaurus
+    const originalTerms = highlight.toLowerCase().trim().split(/\s+/);
+    const expandedTerms = new Set();
+    
+    originalTerms.forEach(term => {
+      const clean = term.replace(/[^\w]/g, '');
+      if (NEIL_THESAURUS[clean]) {
+        NEIL_THESAURUS[clean].forEach(t => expandedTerms.add(t));
+      } else {
+        expandedTerms.add(clean);
+      }
+    });
+
+    // Create a regex that catches any of our expanded terms
+    // We sort by length descending to match longer phrases first if they existed
+    const termList = Array.from(expandedTerms).filter(t => t.length > 0);
+    if (termList.length === 0) return text;
+    
+    const highlightRegex = new RegExp(`(${termList.join('|')})`, 'gi');
+
+    return lines.map((line, lineIdx) => {
+      const tsMatch = line.match(/^\[(\d{2}:\d{2}:\d{2}[.\d]*) -->/);
+      let jumpLink = null;
+      
+      if (tsMatch && youtubeUrl) {
+        const seconds = tsToSec(tsMatch[1]);
+        const seekTime = Math.max(0, Math.floor(seconds) - 5);
+        const separator = youtubeUrl.includes('?') ? '&' : '?';
+        const deepLink = `${youtubeUrl}${separator}t=${seekTime}s`;
+        
+        jumpLink = (
+          <a 
+            href={deepLink} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="timestamp-link"
+            title={`Jump to ${tsMatch[1]} (with 5s buffer)`}
+          >
+            <Play size={10} fill="currentColor" style={{marginRight: '4px'}} />
+          </a>
+        );
+      }
+
+      const parts = line.split(highlightRegex);
+      return (
+        <div key={lineIdx} className="transcript-line">
+          {jumpLink}
+          {parts.map((part, i) => 
+            expandedTerms.has(part.toLowerCase()) ? <span key={i} className="highlight">{part}</span> : part
+          )}
+        </div>
+      );
+    });
   };
 
   return (
@@ -224,7 +288,7 @@ function App() {
                 )}
               </div>
               <div className="result-content">
-                {highlightText(item.snippet || item.text || "", query)}
+                {highlightText(item.snippet || item.text || "", query, item.youtube_url)}
               </div>
             </div>
           ))}

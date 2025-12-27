@@ -198,3 +198,25 @@ body::after {
   transform: scale(1.15);
 }
 
+.transcript-line {
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: flex-start;
+}
+
+.timestamp-link {
+  color: var(--accent-color);
+  margin-right: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+  padding-top: 4px; /* Align with text */
+}
+
+.timestamp-link:hover {
+  opacity: 1;
+}
+
+
