@@ -149,17 +149,20 @@ app.get('/api/search', (req, res) => {
     const sanitizedQuery = query.replace(/"/g, ''); 
     
     let sql = `
-      SELECT id, file, line, date, text_content, snippet(transcripts_fts, 4, '<b>', '</b>', '...', 64) as highlight 
-      FROM transcripts_fts 
-      WHERE transcripts_fts MATCH ? 
+      SELECT t.id, t.file, t.line, t.date, t.text_content, 
+             snippet(transcripts_fts, 4, '<b>', '</b>', '...', 64) as highlight,
+             l.youtube_url
+      FROM transcripts_fts t
+      LEFT JOIN show_links l ON t.date = l.date
+      WHERE t.transcripts_fts MATCH ? 
     `;
     
     const params = [sanitizedQuery]; 
     
     if (yearsParam) {
        const years = yearsParam.split(',');
-       // Create OR condition for years: AND (date LIKE '1999%' OR date LIKE '2000%')
-       const yearPlaceholders = years.map(() => "date LIKE ?").join(' OR ');
+       // Create OR condition for years: AND (t.date LIKE '1999%' OR t.date LIKE '2000%')
+       const yearPlaceholders = years.map(() => "t.date LIKE ?").join(' OR ');
        sql += ` AND (${yearPlaceholders}) `;
        years.forEach(y => params.push(`${y}%`));
     }

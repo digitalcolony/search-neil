@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './index.css';
-import { Radio, Search, Calendar, X } from 'lucide-react';
+import { Radio, Search, Calendar, X, Youtube } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const API_URL = 'http://localhost:3001/api/search';
@@ -210,6 +210,18 @@ function App() {
                   <Radio size={14} style={{display:'inline', marginRight:'5px'}}/>
                   {formatTitle(item)}
                 </span>
+                {item.youtube_url && (
+                  <a 
+                    href={item.youtube_url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="youtube-link"
+                    title="Watch on YouTube"
+                  >
+                    <Youtube size={16} style={{marginRight: '4px'}} />
+                    <span style={{fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'var(--font-mono)'}}>WATCH</span>
+                  </a>
+                )}
               </div>
               <div className="result-content">
                 {highlightText(item.snippet || item.text || "", query)}

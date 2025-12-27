@@ -183,3 +183,18 @@ body::after {
   50% { opacity: 1; }
   100% { opacity: 0.5; }
 }
+
+.youtube-link {
+  color: var(--accent-color);
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+  text-decoration: none;
+  filter: drop-shadow(0 0 2px var(--accent-glow));
+}
+
+.youtube-link:hover {
+  filter: drop-shadow(0 0 8px var(--accent-color));
+  transform: scale(1.15);
+}
+
