@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# SQLite database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
