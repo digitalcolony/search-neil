@@ -3,14 +3,23 @@
   --panel-bg: #1e1e1e;
   --text-primary: #e0e0e0;
   --text-dim: #a0a0a0;
-  
-  /* Retro Amber Theme */
   --accent-color: #ffb000; 
   --accent-glow: rgba(255, 176, 0, 0.4);
   --border-color: #333;
-  
   --font-mono: 'Courier New', Courier, monospace;
   --font-sans: 'Inter', system-ui, sans-serif;
+  --scanline-opacity: 0.15;
+}
+
+[data-theme='light'] {
+  --bg-color: #e8e2d4;
+  --panel-bg: #f2ede1;
+  --text-primary: #2d241c;
+  --text-dim: #7d6e5a;
+  --accent-color: #c47600; 
+  --accent-glow: rgba(196, 118, 0, 0.2);
+  --border-color: #d8cfc0;
+  --scanline-opacity: 0.05;
 }
 
 body {
@@ -32,8 +41,8 @@ body::after {
   height: 100vh;
   background: repeating-linear-gradient(
     0deg,
-    rgba(0, 0, 0, 0.15),
-    rgba(0, 0, 0, 0.15) 1px,
+    rgba(0, 0, 0, var(--scanline-opacity)),
+    rgba(0, 0, 0, var(--scanline-opacity)) 1px,
     transparent 1px,
     transparent 2px
   );
@@ -45,7 +54,18 @@ body::after {
 .container {
   max-width: 1000px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 0 2rem 2rem 2rem;
+}
+
+.sticky-header {
+  position: sticky;
+  top: 0;
+  background-color: var(--bg-color);
+  z-index: 1000;
+  padding-top: 2rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 1.5rem;
 }
 
 .retro-title {
@@ -55,10 +75,28 @@ body::after {
   letter-spacing: 2px;
   text-shadow: 0 0 10px var(--accent-glow);
   text-align: center;
-  margin-bottom: 2rem;
-  border-bottom: 2px solid var(--border-color);
+  margin-bottom: 1.5rem;
   padding-bottom: 1rem;
 }
+
+.theme-toggle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  cursor: pointer;
+  color: var(--text-dim);
+  transition: all 0.2s ease;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-toggle:hover {
+  color: var(--accent-color);
+  transform: scale(1.1);
+}
+
 
 .search-bar {
   width: 100%;

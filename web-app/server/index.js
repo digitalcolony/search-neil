@@ -28,6 +28,18 @@ db.exec(`
   );
 `);
 
+// Create Trigram Table for Fuzzy Search (handles typos like goldstien vs goldstein)
+db.exec(`
+  CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts_trigram USING fts5(
+    id, 
+    file, 
+    line, 
+    date, 
+    text_content, 
+    tokenize="trigram"
+  );
+`);
+
 // Simple KV for tracking if we have indexed or not
 db.exec(`
   CREATE TABLE IF NOT EXISTS metadata (
@@ -45,33 +57,42 @@ function getDateFromFilename(filename) {
   return 'Unknown Date';
 }
 
-// Check if we need to build index
-const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed');
+// Check if we need to build index (v2 includes trigram fuzzy search)
+const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v2');
 let isIndexed = row ? row.value === 'true' : false;
 let indexingProgress = { current: 0, total: 0 };
 
 async function buildIndex() {
   if (isIndexed) {
-      console.log('Database already indexed. Skipping.');
+      console.log('Database already indexed (v2). Skipping.');
       return;
   }
 
-  console.log('Starting SQLite Indexing...');
+  console.log('Starting SQLite Indexing (v2 with Fuzzy Search)...');
   
-  // Clear old data just in case
+  // Clear old data to ensure consistency across both tables
   db.prepare('DELETE FROM transcripts_fts').run();
+  db.prepare('DELETE FROM transcripts_fts_trigram').run();
 
   const files = await glob(TRANSCRIPTS_DIR + '/**/*.txt');
   console.log(`Found ${files.length} transcripts to ingest.`);
   indexingProgress.total = files.length;
 
-  const insert = db.prepare(`
+  const insertPorter = db.prepare(`
     INSERT INTO transcripts_fts (id, file, line, date, text_content) 
     VALUES (@id, @file, @line, @date, @text_content)
   `);
 
+  const insertTrigram = db.prepare(`
+    INSERT INTO transcripts_fts_trigram (id, file, line, date, text_content) 
+    VALUES (@id, @file, @line, @date, @text_content)
+  `);
+
   const insertMany = db.transaction((docs) => {
-    for (const doc of docs) insert.run(doc);
+    for (const doc of docs) {
+      insertPorter.run(doc);
+      insertTrigram.run(doc);
+    }
   });
 
   let batch = [];
@@ -121,7 +142,7 @@ async function buildIndex() {
   if (batch.length > 0) insertMany(batch);
 
   // Mark complete
-  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed', 'true');
+  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v2', 'true');
   isIndexed = true;
   console.log('Indexing Complete!');
 }
@@ -144,6 +165,11 @@ const NEIL_THESAURUS = {
 };
 
 function expandQuery(query) {
+  // If query is wrapped in quotes, treat as verbatim (no expansion)
+  if (query.startsWith('"') && query.endsWith('"')) {
+    return query;
+  }
+
   const words = query.toLowerCase().split(/\s+/);
   const expandedParts = words.map(word => {
     // Basic match for exact word from thesaurus
@@ -159,50 +185,78 @@ function expandQuery(query) {
 app.get('/api/search', (req, res) => {
   const query = req.query.q;
   const yearsParam = req.query.years;
+  const offset = req.query.offset ? parseInt(req.query.offset) : 0;
+  const limit = 100;
 
   if (!isIndexed) return res.status(503).json({ error: 'Indexing', progress:  Math.round((indexingProgress.current / indexingProgress.total) * 100)});
   if (!query) return res.json([]);
 
   try {
+    const isVerbatim = query.startsWith('"') && query.endsWith('"');
     const expandedQuery = expandQuery(query);
-    console.log(`Original: "${query}" -> Expanded: "${expandedQuery}"`);
     
-    let sql = `
-      SELECT t.id, t.file, t.line, t.date, t.text_content, 
-             snippet(transcripts_fts, 4, '<b>', '</b>', '...', 64) as highlight,
-             l.youtube_url
-      FROM transcripts_fts t
-      LEFT JOIN show_links l ON t.date = l.date
-      WHERE t.transcripts_fts MATCH ? 
-    `;
+    // Check for show-wide AND operator
+    const isAndSearch = expandedQuery.toUpperCase().includes(' AND ');
     
-    const params = [expandedQuery]; 
-    
-    if (yearsParam) {
-       const years = yearsParam.split(',');
-       // Create OR condition for years: AND (t.date LIKE '1999%' OR t.date LIKE '2000%')
-       const yearPlaceholders = years.map(() => "t.date LIKE ?").join(' OR ');
-       sql += ` AND (${yearPlaceholders}) `;
-       years.forEach(y => params.push(`${y}%`));
+    const getSearchResults = (tableName, queryString, searchParams, currentOffset) => {
+      let finalMatchQuery = queryString;
+      let filterSql = '';
+
+      if (isAndSearch) {
+        // Split and expand each part for the intersection
+        const parts = query.split(/\s+AND\s+/i);
+        const expandedParts = parts.map(p => expandQuery(p.trim()));
+        
+        // Match segments that contain ANY of the terms...
+        finalMatchQuery = `(${expandedParts.join(' OR ')})`;
+        
+        // ...but only in shows that contain ALL of the terms
+        const intersectQueries = expandedParts.map(p => `SELECT file FROM ${tableName} WHERE ${tableName} MATCH ${db.prepare('?').bind(p).source.replace('?', `'${p}'`)}`);
+        // Note: better-sqlite3 doesn't have a direct way to build this string safely with bindings in a subquery easily
+        // so we will use a set of temp params or just trust FTS match syntax which is already sanitized in expandQuery
+        filterSql = ` AND t.file IN (
+          ${expandedParts.map(() => `SELECT file FROM ${tableName} WHERE ${tableName} MATCH ?`).join(' INTERSECT ')}
+        )`;
+      }
+
+      let sql = `
+        SELECT t.id, t.file, t.line, t.date, t.text_content, 
+               snippet(${tableName}, 4, '<b>', '</b>', '...', 64) as highlight,
+               l.youtube_url
+        FROM ${tableName} t
+        LEFT JOIN show_links l ON t.date = l.date
+        WHERE t.${tableName} MATCH ? 
+        ${filterSql}
+      `;
+      
+      const queryParams = [finalMatchQuery];
+      if (isAndSearch) {
+        const parts = query.split(/\s+AND\s+/i);
+        parts.forEach(p => queryParams.push(expandQuery(p.trim())));
+      }
+      
+      if (yearsParam) {
+         const years = yearsParam.split(',');
+         const yearPlaceholders = years.map(() => "t.date LIKE ?").join(' OR ');
+         sql += ` AND (${yearPlaceholders}) `;
+         years.forEach(y => queryParams.push(`${y}%`));
+      }
+
+      sql += ` ORDER BY rank LIMIT ${limit} OFFSET ${currentOffset}`;
+      return db.prepare(sql).all(...queryParams);
+    };
+
+    // 1. Try Exact/Porter search first
+    let results = getSearchResults('transcripts_fts', expandedQuery, yearsParam, offset);
+
+    // 2. Fallback to Fuzzy/Trigram ONLY if verbatim search is NOT used AND exact results were 0
+    // This prevents "Elian" from matching "reliance" when exact hits for Elian exist.
+    if (!isVerbatim && results.length === 0 && query.length >= 3) {
+      const fuzzyResults = getSearchResults('transcripts_fts_trigram', expandedQuery, yearsParam, offset);
+      results = fuzzyResults;
     }
 
-    const limit = 100;
-    const offset = req.query.offset ? parseInt(req.query.offset) : 0;
-
-    sql += ` ORDER BY rank LIMIT ${limit} OFFSET ${offset}`;
-
-    const results = db.prepare(sql).all(...params);
-
-    // Context Loading
-    // We already have text_content, but if we want surrounding lines we might read file.
-    // Ideally we just specific snippets.
-    
-    // For now, let's just return what we have. 
-    // The user wanted "context". FTS snippet gives small context.
-    // Let's stick to reading file for "Full Context" like before if snippet is too short.
-    
     const enriched = results.map(hit => {
-        // Only read file if we really need larger context than what we stored
         try {
             const fullPath = path.join(TRANSCRIPTS_DIR, hit.file);
             const content = fs.readFileSync(fullPath, 'utf-8');

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './index.css';
-import { Radio, Search, Calendar, X, Youtube, Play } from 'lucide-react';
+import { Radio, Search, Calendar, X, Youtube, Play, Sun, Moon } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const API_URL = 'http://localhost:3001/api/search';
@@ -33,8 +33,17 @@ function App() {
   const [indexStatus, setIndexStatus] = useState('');
   const [retryTick, setRetryTick] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
   
   const searchTimeout = useRef(null);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
   // Load more function
   const loadMore = async () => {
@@ -190,64 +199,86 @@ function App() {
 
   return (
     <div className="container">
-      <header>
-        <h1 className="retro-title">
-          <Radio style={{display:'inline', marginRight:'10px', verticalAlign:'middle'}} size={32} />
-          The Neil Rogers Archive
-        </h1>
-      </header>
-      
-      <div className="controls">
-        <div style={{position: 'relative'}}>
-          <input 
-            type="text" 
-            className="search-bar" 
-            placeholder="Search transcripts (e.g., 'Rick and Suds', 'Al Goldstein')..." 
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            autoFocus
-          />
-          {query ? (
-             <X 
-               onClick={() => setQuery('')}
-               style={{
-                 position:'absolute', 
-                 right:'15px', 
-                 top:'15px', 
-                 color:'var(--text-dim)', 
-                 cursor: 'pointer'
-               }} 
-             />
-          ) : (
-             <Search style={{position:'absolute', right:'15px', top:'15px', color:'var(--text-dim)'}} />
-          )}
-        </div>
-
-        <div className="timeline">
+      <div className="sticky-header">
+        <header style={{position: 'relative'}}>
           <div 
-            className={`timeline-chip ${selectedYears.length === 0 ? 'active' : ''}`}
-            onClick={() => setSelectedYears([])}
+            onClick={toggleTheme} 
+            className="theme-toggle"
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
           >
-            ALL YEARS
+            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
           </div>
-          {YEARS.map(year => (
+          <h1 className="retro-title">
+            <Radio style={{display:'inline', marginRight:'10px', verticalAlign:'middle'}} size={32} />
+            The Neil Rogers Archive
+          </h1>
+        </header>
+        
+        <div className="controls">
+          <div style={{position: 'relative'}}>
+            <input 
+              type="text" 
+              className="search-bar" 
+              placeholder="Search transcripts (e.g., 'Rick and Suds', 'Al Goldstein')..." 
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+            />
+            {query ? (
+               <X 
+                 onClick={() => setQuery('')}
+                 style={{
+                   position:'absolute', 
+                   right:'15px', 
+                   top:'15px', 
+                   color:'var(--text-dim)', 
+                   cursor: 'pointer'
+                 }} 
+               />
+            ) : (
+               <Search style={{position:'absolute', right:'15px', top:'15px', color:'var(--text-dim)'}} />
+            )}
+          </div>
+  
+          <div className="timeline">
             <div 
-              key={year} 
-              className={`timeline-chip ${selectedYears.includes(year) ? 'active' : ''}`}
-              onClick={() => {
-                 setSelectedYears(prev => {
-                    if (prev.includes(year)) {
-                       return prev.filter(y => y !== year);
-                    } else {
-                       return [...prev, year];
-                    }
-                 });
-              }}
+              className={`timeline-chip ${selectedYears.length === 0 ? 'active' : ''}`}
+              onClick={() => setSelectedYears([])}
             >
-              {year}
+              ALL YEARS
             </div>
-          ))}
+            {YEARS.map(year => (
+              <div 
+                key={year} 
+                className={`timeline-chip ${selectedYears.includes(year) ? 'active' : ''}`}
+                onClick={() => {
+                   setSelectedYears(prev => {
+                      if (prev.includes(year)) {
+                         return prev.filter(y => y !== year);
+                      } else {
+                         return [...prev, year];
+                      }
+                   });
+                }}
+              >
+                {year}
+              </div>
+            ))}
+          </div>
         </div>
+        
+        {!loading && !indexStatus && query && (
+          <div style={{
+            textAlign: 'center', 
+            marginBottom: '0.5rem', 
+            color: 'var(--text-dim)', 
+            fontSize: '0.75rem', 
+            fontFamily: 'var(--font-mono)',
+            textTransform: 'uppercase'
+          }}>
+            FOUND {results.length}{hasMore ? '+' : ''} SEGMENTS IN {(searchTime/1000).toFixed(2)}s
+          </div>
+        )}
       </div>
 
       <main>
@@ -260,11 +291,7 @@ function App() {
           </div>
         )}
         
-        {!loading && !indexStatus && query && (
-          <div style={{marginBottom:'1rem', color:'var(--text-dim)', fontSize:'0.8rem', fontFamily:'var(--font-mono)'}}>
-            FOUND {results.length}{hasMore ? '+' : ''} SEGMENTS IN {(searchTime/1000).toFixed(2)}s
-          </div>
-        )}
+
 
         <div className="results-grid">
           {results.map((item) => (
