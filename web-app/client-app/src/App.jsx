@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './index.css';
-import { Radio, Search, Calendar, X, Youtube, Play, Sun, Moon, List } from 'lucide-react';
+import { Radio, Search, Calendar, X, Play, Sun, Moon, List } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const API_URL = 'http://localhost:3001/api/search';
@@ -35,6 +35,19 @@ const YEARS = [
   '1990', '1991', '1992', '1993', '1994', '1995', '1996', '1997', '1998',
   '1999', '2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007', '2008', '2009'
 ];
+
+const YouTubeIcon = ({ size = 16, style = {} }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="currentColor" 
+    style={style}
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+  </svg>
+);
 
 function App() {
   const [query, setQuery] = useState('');
@@ -329,7 +342,6 @@ function App() {
                 setShowBestOf(!showBestOf);
                 if (!showBestOf) setSelectedYears([]);
               }}
-              style={showBestOf ? { backgroundColor: 'var(--youtube-red)', borderColor: 'var(--youtube-red)', color: 'white' } : {}}
             >
               BEST OF
             </div>
@@ -417,10 +429,10 @@ function App() {
                         target="_blank" 
                         rel="noopener noreferrer" 
                         className="youtube-link"
-                        title="Watch on YouTube"
+                        title="Play on YouTube"
                       >
-                        <Youtube size={16} style={{marginRight: '4px'}} />
-                        <span style={{fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'var(--font-mono)'}}>WATCH</span>
+                        <YouTubeIcon size={16} style={{marginRight: '4px'}} />
+                        <span style={{fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'var(--font-mono)'}}>PLAY</span>
                       </a>
                     )}
                   </div>
@@ -432,7 +444,7 @@ function App() {
               
               {!loading && query && results.length === 0 && (
                  <div style={{textAlign:'center', padding:'2rem', color:'var(--text-dim)'}}>
-                   NO SIGNAL FOUND. TRY ADJUSTING YOUR FREQUENCY.
+                   NO RESULTS FOUND
                  </div>
               )}
 
@@ -471,9 +483,10 @@ function App() {
                         target="_blank" 
                         rel="noopener noreferrer" 
                         className="youtube-link"
+                        title="Play on YouTube"
                       >
-                        <Youtube size={16} style={{marginRight: '4px'}} />
-                        <span style={{fontSize: '0.7rem'}}>WATCH</span>
+                        <YouTubeIcon size={16} style={{marginRight: '4px'}} />
+                        <span style={{fontSize: '0.7rem'}}>PLAY</span>
                       </a>
                     )}
                   </div>
