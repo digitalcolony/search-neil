@@ -13,6 +13,12 @@ const PORT = 3001;
 const TRANSCRIPTS_DIR = path.resolve(__dirname, '../../transcripts/timestamps');
 const DB_PATH = path.resolve(__dirname, 'transcripts.db');
 
+const getFullPath = (relPath) => {
+    return relPath.startsWith('best-of/') 
+        ? path.join(path.dirname(TRANSCRIPTS_DIR), relPath)
+        : path.join(TRANSCRIPTS_DIR, relPath);
+};
+
 // Initialize DB
 const db = new Database(DB_PATH);
 
@@ -20,20 +26,23 @@ const db = new Database(DB_PATH);
 function createTables() {
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
-      id, file, line, date, text_content, tokenize="porter"
+      id, file, line, date, text_content, type, tokenize="porter"
     );
   `);
 
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts_trigram USING fts5(
-      id, file, line, date, text_content, tokenize="trigram"
+      id, file, line, date, text_content, type, tokenize="trigram"
     );
   `);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS shows (
-      date TEXT PRIMARY KEY,
-      file TEXT
+      date TEXT,
+      file TEXT PRIMARY KEY,
+      type TEXT,
+      youtube_url TEXT,
+      custom_title TEXT
     );
   `);
 
@@ -62,21 +71,28 @@ function getDateFromFilename(filename) {
     const d = match[1];
     return `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`;
   }
+  
+  // Best Of handler (e.g., 1988.md)
+  const yearMatch = filename.match(/^(\d{4})/);
+  if (yearMatch) {
+    return `${yearMatch[1]}-01-01`;
+  }
+
   return 'Unknown Date';
 }
 
-// Check if we need to build index (v5 includes Lassiter date fix)
-const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v5');
+// Check if we need to build index (v6 includes Best Of support)
+const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v6');
 let isIndexed = row ? row.value === 'true' : false;
 let indexingProgress = { current: 0, total: 0 };
 
 async function buildIndex() {
   if (isIndexed) {
-      console.log('Database already indexed (v5). Skipping.');
+      console.log('Database already indexed (v6). Skipping.');
       return;
   }
 
-  console.log('Starting SQLite Indexing (v5 with Drop/Recreate)...');
+  console.log('Starting SQLite Indexing (v6 with Best Of support)...');
   
   // Faster than DELETE: DROP and Recreate
   db.exec(`DROP TABLE IF EXISTS transcripts_fts`);
@@ -85,21 +101,30 @@ async function buildIndex() {
   createTables();
 
   const files = await glob(TRANSCRIPTS_DIR + '/**/*.txt');
-  console.log(`Found ${files.length} transcripts to ingest.`);
-  indexingProgress.total = files.length;
+  const bestOfDir = path.resolve(TRANSCRIPTS_DIR, '../best-of');
+  const bestOfFiles = fs.existsSync(bestOfDir) ? await glob(bestOfDir + '/*.md') : [];
+  
+  const allFiles = [
+    ...files.map(f => ({ path: f, type: 'show' })),
+    ...bestOfFiles.map(f => ({ path: f, type: 'best_of' }))
+  ];
+
+  console.log(`Found ${files.length} shows and ${bestOfFiles.length} best-of files to ingest.`);
+  indexingProgress.total = allFiles.length;
 
   const insertPorter = db.prepare(`
-    INSERT INTO transcripts_fts (id, file, line, date, text_content) 
-    VALUES (@id, @file, @line, @date, @text_content)
+    INSERT INTO transcripts_fts (id, file, line, date, text_content, type) 
+    VALUES (@id, @file, @line, @date, @text_content, @type)
   `);
 
   const insertTrigram = db.prepare(`
-    INSERT INTO transcripts_fts_trigram (id, file, line, date, text_content) 
-    VALUES (@id, @file, @line, @date, @text_content)
+    INSERT INTO transcripts_fts_trigram (id, file, line, date, text_content, type) 
+    VALUES (@id, @file, @line, @date, @text_content, @type)
   `);
 
   const insertShow = db.prepare(`
-    INSERT OR IGNORE INTO shows (date, file) VALUES (@date, @file)
+    INSERT OR REPLACE INTO shows (date, file, type, youtube_url, custom_title) 
+    VALUES (@date, @file, @type, @youtube_url, @custom_title)
   `);
 
   const insertMany = db.transaction((docs, shows) => {
@@ -115,47 +140,66 @@ async function buildIndex() {
   let batch = [];
   let showsBatch = [];
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
+  for (let i = 0; i < allFiles.length; i++) {
+    const fileInfo = allFiles[i];
+    const file = fileInfo.path;
+    const type = fileInfo.type;
+    
     indexingProgress.current = i + 1;
-
-    // Yield for event loop responsiveness
     if (i % 50 === 0) await new Promise(r => setImmediate(r));
 
     const content = fs.readFileSync(file, 'utf-8');
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     const filename = path.basename(file);
     const date = getDateFromFilename(filename);
-    const relativePath = path.relative(TRANSCRIPTS_DIR, file);
+    const relativePath = type === 'best_of' ? `best-of/${filename}` : path.relative(TRANSCRIPTS_DIR, file);
 
-    // Track the show for the optimized list
-    showsBatch.push({ date, file: relativePath });
+    if (type === 'best_of') {
+      const title = lines[0]?.trim() || filename;
+      const ytUrl = lines[1]?.trim() || '';
+      showsBatch.push({ date, file: relativePath, type, youtube_url: ytUrl, custom_title: title });
 
-    let currentDoc = null;
-
-    for (let j = 0; j < lines.length; j++) {
-      const line = lines[j].trim();
-      if (!line) continue;
-
-      if (line.startsWith('[') && line.includes('-->')) {
-        if (currentDoc) batch.push(currentDoc);
-        currentDoc = {
-          id: `${relativePath}::${j}`,
-          file: relativePath,
-          line: j,
-          date: date,
-          text_content: ''
-        };
-      } else if (currentDoc) {
-        currentDoc.text_content += ' ' + line;
+      for (let j = 2; j < lines.length; j++) {
+        const line = lines[j].trim();
+        if (!line || line === '.') continue;
+        const tsMatch = line.match(/^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.*)/);
+        if (tsMatch) {
+          batch.push({
+            id: `${relativePath}::${j}`,
+            file: relativePath,
+            line: j,
+            date: date,
+            text_content: line, // Keep the whole line for better display
+            type: 'best_of'
+          });
+        }
       }
+    } else {
+      showsBatch.push({ date, file: relativePath, type, youtube_url: null, custom_title: null });
+      let currentDoc = null;
+      for (let j = 0; j < lines.length; j++) {
+        const line = lines[j].trim();
+        if (!line) continue;
+        if (line.startsWith('[') && line.includes('-->')) {
+          if (currentDoc) batch.push(currentDoc);
+          currentDoc = {
+            id: `${relativePath}::${j}`,
+            file: relativePath,
+            line: j,
+            date: date,
+            text_content: '',
+            type: 'show'
+          };
+        } else if (currentDoc) {
+          currentDoc.text_content += ' ' + line;
+        }
+      }
+      if (currentDoc) batch.push(currentDoc);
     }
-    if (currentDoc) batch.push(currentDoc);
 
-    // Commit every 50 files
     if (showsBatch.length >= 50) {
       insertMany(batch, showsBatch);
-      console.log(`Indexed ${i} / ${files.length} files...`);
+      console.log(`Indexed ${i + 1} / ${allFiles.length} files...`);
       batch = [];
       showsBatch = [];
     }
@@ -164,7 +208,7 @@ async function buildIndex() {
   if (batch.length > 0 || showsBatch.length > 0) insertMany(batch, showsBatch);
 
   // Mark complete
-  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v5', 'true');
+  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v6', 'true');
   isIndexed = true;
   console.log('Indexing Complete!');
 }
@@ -241,14 +285,23 @@ app.get('/api/search', (req, res) => {
         )`;
       }
 
+      const typeParam = req.query.type;
+      let typeFilter = ' AND t.type = ? ';
+      const typeValue = typeParam || 'show';
+
       let sql = `
         SELECT t.id, t.file, t.line, t.date, t.text_content, 
                snippet(${tableName}, 4, '<b>', '</b>', '...', 64) as highlight,
-               l.youtube_url, l.host, l.custom_title
+               COALESCE(l.youtube_url, s.youtube_url) as youtube_url, 
+               l.host, 
+               COALESCE(l.custom_title, s.custom_title) as custom_title,
+               t.type
         FROM ${tableName} t
         LEFT JOIN show_links l ON t.date = l.date
+        LEFT JOIN shows s ON t.file = s.file
         WHERE t.${tableName} MATCH ? 
         ${filterSql}
+        ${typeFilter}
       `;
       
       const queryParams = [finalMatchQuery];
@@ -256,6 +309,8 @@ app.get('/api/search', (req, res) => {
         const parts = query.split(/\s+AND\s+/i);
         parts.forEach(p => queryParams.push(expandQuery(p.trim())));
       }
+      
+      queryParams.push(typeValue);
       
       if (yearsParam) {
          const years = yearsParam.split(',');
@@ -280,7 +335,7 @@ app.get('/api/search', (req, res) => {
 
     const enriched = results.map(hit => {
         try {
-            const fullPath = path.join(TRANSCRIPTS_DIR, hit.file);
+            const fullPath = getFullPath(hit.file);
             const content = fs.readFileSync(fullPath, 'utf-8');
             const lines = content.split('\n');
             const startLine = Math.max(0, hit.line);
@@ -304,18 +359,23 @@ app.get('/api/search', (req, res) => {
 
 app.get('/api/shows', (req, res) => {
   const yearsParam = req.query.years;
+  const typeParam = req.query.type;
   if (!isIndexed) return res.status(503).json({ error: 'Indexing', progress:  Math.round((indexingProgress.current / indexingProgress.total) * 100)});
   
-  console.log(`[API] Fetching shows for years: ${yearsParam || 'ALL'}`);
+  console.log(`[API] Fetching shows for years: ${yearsParam || 'ALL'}, type: ${typeParam || 'ALL'}`);
   
   try {
     let sql = `
-      SELECT s.date, s.file, l.youtube_url, l.host, l.custom_title
+      SELECT s.date, s.file, COALESCE(l.youtube_url, s.youtube_url) as youtube_url, l.host, COALESCE(l.custom_title, s.custom_title) as custom_title, s.type
       FROM shows s
       LEFT JOIN show_links l ON s.date = l.date
       WHERE 1=1
     `;
     const params = [];
+
+    const typeValue = typeParam || 'show';
+    sql += ` AND s.type = ? `;
+    params.push(typeValue);
 
     if (yearsParam) {
       const years = yearsParam.split(',');
@@ -336,7 +396,7 @@ app.get('/api/shows', (req, res) => {
 app.get('/api/transcript', (req, res) => {
     const relPath = req.query.file;
     if (!relPath) return res.status(400).send('Missing file param');
-    const fullPath = path.join(TRANSCRIPTS_DIR, relPath);
+    const fullPath = getFullPath(relPath);
     if (fs.existsSync(fullPath)) {
         fs.readFile(fullPath, 'utf8', (err, data) => res.send(data));
     } else {

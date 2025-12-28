@@ -9,6 +9,7 @@
   --font-mono: 'Courier New', Courier, monospace;
   --font-sans: 'Inter', system-ui, sans-serif;
   --scanline-opacity: 0.15;
+  --youtube-red: #ff0000;
 }
 
 [data-theme='light'] {

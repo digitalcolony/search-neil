@@ -8,6 +8,9 @@ const API_URL = 'http://localhost:3001/api/search';
 
 // Helper: Format nice date
 const formatTitle = (item) => {
+   if (item.type === 'best_of' && item.custom_title) {
+     return item.custom_title;
+   }
    // item.date is YYYY-MM-DD
    try {
      const dateObj = parseISO(item.date);
@@ -45,6 +48,7 @@ function App() {
   const [hasMore, setHasMore] = useState(false);
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
   const [activeTab, setActiveTab] = useState('search'); // 'search' or 'shows'
+  const [showBestOf, setShowBestOf] = useState(false);
   const [allShows, setAllShows] = useState([]);
   const [loadingShows, setLoadingShows] = useState(false);
   
@@ -64,7 +68,11 @@ function App() {
      
      const currentOffset = results.length;
      const params = { q: query, offset: currentOffset };
-     if (selectedYears.length > 0) params.years = selectedYears.join(',');
+     if (showBestOf) {
+       params.type = 'best_of';
+     } else if (selectedYears.length > 0) {
+       params.years = selectedYears.join(',');
+     }
      
      try {
        const res = await axios.get(API_URL, { params });
@@ -80,7 +88,7 @@ function App() {
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
 
     // If we're just retrying for status, don't clear results/status immediately
-    if (!query.trim()) {
+    if (!query.trim() && !showBestOf) { // Added showBestOf condition
       setResults([]);
       setIndexStatus('');
       setHasMore(false);
@@ -98,7 +106,11 @@ function App() {
       const startTime = performance.now();
       try {
         const params = { q: query };
-        if (selectedYears.length > 0) params.years = selectedYears.join(',');
+        if (showBestOf) {
+          params.type = 'best_of';
+        } else if (selectedYears.length > 0) {
+          params.years = selectedYears.join(',');
+        }
 
         const res = await axios.get(API_URL, { 
             params,
@@ -135,7 +147,7 @@ function App() {
         clearTimeout(searchTimeout.current);
         controller.abort();
     };
-  }, [query, selectedYears, retryTick]);
+  }, [query, selectedYears, retryTick, showBestOf]); // Added showBestOf
 
   // Fetch all shows for the "Show List" tab
   useEffect(() => {
@@ -144,7 +156,11 @@ function App() {
         setLoadingShows(true);
         try {
           const params = {};
-          if (selectedYears.length > 0) params.years = selectedYears.join(',');
+          if (showBestOf) {
+            params.type = 'best_of';
+          } else if (selectedYears.length > 0) {
+            params.years = selectedYears.join(',');
+          }
           const res = await axios.get('http://localhost:3001/api/shows', { params });
           setAllShows(res.data);
           setIndexStatus(''); // Clear status on success
@@ -167,14 +183,14 @@ function App() {
       };
       fetchShows();
     }
-  }, [activeTab, selectedYears]);
+  }, [activeTab, selectedYears, showBestOf]);
 
   // Helper: Convert HH:MM:SS.ms to seconds
   const tsToSec = (ts) => {
     const parts = ts.split(':').map(parseFloat);
-    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    if (parts.length === 2) return parts[0] * 60 + parts[1];
-    return parts[0] || 0;
+    if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+    if (parts.length === 2) return (parts[0] * 60) + parts[1];
+    return parts[0];
   };
 
   const NEIL_THESAURUS = {
@@ -208,7 +224,7 @@ function App() {
     const highlightRegex = new RegExp(`(${termList.join('|')})`, 'gi');
 
     return lines.map((line, lineIdx) => {
-      const tsMatch = line.match(/^\[(\d{2}:\d{2}:\d{2}[.\d]*) -->/);
+      const tsMatch = line.match(/^\[(\d{2}:\d{2}:\d{2}[.\d]*) -->/) || line.match(/^(\d{1,2}:\d{2}(?::\d{2})?)/);
       let jumpLink = null;
       
       if (tsMatch && youtubeUrl) {
@@ -239,6 +255,16 @@ function App() {
           )}
         </div>
       );
+    });
+  };
+
+  const toggleYear = (year) => {
+    setSelectedYears(prev => {
+      if (prev.includes(year)) {
+        return prev.filter(y => y !== year);
+      } else {
+        return [...prev, year];
+      }
     });
   };
 
@@ -289,23 +315,31 @@ function App() {
   
           <div className="timeline">
             <div 
-              className={`timeline-chip ${selectedYears.length === 0 ? 'active' : ''}`}
-              onClick={() => setSelectedYears([])}
+              className={`timeline-chip ${selectedYears.length === 0 && !showBestOf ? 'active' : ''}`}
+              onClick={() => {
+                setSelectedYears([]);
+                setShowBestOf(false);
+              }}
             >
               ALL YEARS
+            </div>
+            <div 
+              className={`timeline-chip ${showBestOf ? 'active' : ''}`}
+              onClick={() => {
+                setShowBestOf(!showBestOf);
+                if (!showBestOf) setSelectedYears([]);
+              }}
+              style={showBestOf ? { backgroundColor: 'var(--youtube-red)', borderColor: 'var(--youtube-red)', color: 'white' } : {}}
+            >
+              BEST OF
             </div>
             {YEARS.map(year => (
               <div 
                 key={year} 
                 className={`timeline-chip ${selectedYears.includes(year) ? 'active' : ''}`}
                 onClick={() => {
-                   setSelectedYears(prev => {
-                      if (prev.includes(year)) {
-                         return prev.filter(y => y !== year);
-                      } else {
-                         return [...prev, year];
-                      }
-                   });
+                  toggleYear(year);
+                  setShowBestOf(false);
                 }}
               >
                 {year}
