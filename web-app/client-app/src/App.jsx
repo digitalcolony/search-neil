@@ -57,6 +57,7 @@ function App() {
   const [searchTime, setSearchTime] = useState(0);
   
   const [indexStatus, setIndexStatus] = useState('');
+  const [totalFiles, setTotalFiles] = useState(-1); // -1 means unknown
   const [retryTick, setRetryTick] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
@@ -138,9 +139,14 @@ function App() {
         }
 
         if (err.response && err.response.status === 503) {
-           const progress = err.response.data.progress;
+           const { progress, totalFiles: count } = err.response.data;
            setResults([]); 
-           setIndexStatus(`Indexing database... ${progress}% complete`);
+           setTotalFiles(count);
+           if (count === 0) {
+             setIndexStatus(`Indexing Error: No transcripts found in directory.`);
+           } else {
+             setIndexStatus(`Indexing database... ${progress}% complete`);
+           }
            
            // Retry after 1s
            setTimeout(() => {
@@ -153,6 +159,10 @@ function App() {
       } finally {
         setLoading(false);
         setSearchTime(performance.now() - startTime);
+        // Refresh totalFiles on success if it was unknown
+        if (totalFiles === -1) {
+           axios.get('/api/status').then(r => setTotalFiles(r.data.totalFiles)).catch(() => {});
+        }
       }
     }, 400); // 400ms delay
 
@@ -176,17 +186,15 @@ function App() {
           }
           const res = await axios.get('/api/shows', { params });
           setAllShows(res.data);
-          setIndexStatus(''); // Clear status on success
+          setIndexStatus(''); 
+          // Get status to know if we have 0 files
+          const status = await axios.get('/api/status');
+          setTotalFiles(status.data.totalFiles);
         } catch (err) {
           if (err.response && err.response.status === 503) {
-            const progress = err.response.data.progress;
-            setAllShows([]);
-            setIndexStatus(`Indexing database... ${progress}% complete`);
-            
-            // Retry after 2s
-            setTimeout(() => {
-              fetchShows();
-            }, 2000);
+             setIndexStatus(`Indexing database... ${err.response.data.progress}% complete`);
+             setTotalFiles(err.response.data.totalFiles);
+             setTimeout(() => setRetryTick(t => t + 1), 1000);
           } else {
             console.error("Failed to fetch shows", err);
           }

@@ -10,8 +10,15 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
-const TRANSCRIPTS_DIR = path.resolve(__dirname, '../../transcripts/timestamps');
-const DB_PATH = path.resolve(__dirname, 'transcripts.db');
+const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../../');
+const TRANSCRIPTS_DIR = path.resolve(DATA_DIR, 'transcripts/timestamps');
+const DB_PATH = path.resolve(DATA_DIR, 'transcripts.db');
+const BEST_OF_DIR = path.resolve(DATA_DIR, 'transcripts/best-of');
+
+console.log(`[INIT] Transcript directory resolved to: ${TRANSCRIPTS_DIR}`);
+if (!fs.existsSync(TRANSCRIPTS_DIR)) {
+  console.warn(`[WARNING] Transcript directory NOT FOUND at ${TRANSCRIPTS_DIR}. Search will return no results.`);
+}
 
 const getFullPath = (relPath) => {
     return relPath.startsWith('best-of/') 
@@ -89,6 +96,9 @@ let indexingProgress = { current: 0, total: 0 };
 async function buildIndex() {
   if (isIndexed) {
       console.log('Database already indexed (v6). Skipping.');
+      // Quick check if we have data anyway
+      const count = db.prepare('SELECT COUNT(*) as count FROM shows').get().count;
+      console.log(`[STATUS] Database has ${count} shows indexed.`);
       return;
   }
 
@@ -101,13 +111,16 @@ async function buildIndex() {
   createTables();
 
   const files = await glob(TRANSCRIPTS_DIR + '/**/*.txt');
-  const bestOfDir = path.resolve(TRANSCRIPTS_DIR, '../best-of');
-  const bestOfFiles = fs.existsSync(bestOfDir) ? await glob(bestOfDir + '/*.md') : [];
+  const bestOfFiles = fs.existsSync(BEST_OF_DIR) ? await glob(BEST_OF_DIR + '/*.md') : [];
   
   const allFiles = [
     ...files.map(f => ({ path: f, type: 'show' })),
     ...bestOfFiles.map(f => ({ path: f, type: 'best_of' }))
   ];
+
+  if (allFiles.length === 0) {
+    console.error(`[CRITICAL] No transcripts found in ${TRANSCRIPTS_DIR} or ${bestOfDir}. Check your deployment.`);
+  }
 
   console.log(`Found ${files.length} shows and ${bestOfFiles.length} best-of files to ingest.`);
   indexingProgress.total = allFiles.length;
@@ -266,7 +279,8 @@ if (!isIndexed) {
 app.get('/api/status', (req, res) => {
   res.json({
     ready: isIndexed,
-    progress: indexingProgress.total ? Math.round((indexingProgress.current / indexingProgress.total) * 100) : 0
+    progress: indexingProgress.total ? Math.round((indexingProgress.current / indexingProgress.total) * 100) : 0,
+    totalFiles: indexingProgress.total || 0
   });
 });
 
