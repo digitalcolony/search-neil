@@ -4,7 +4,7 @@ import './index.css';
 import { Radio, Search, Calendar, X, Play, Sun, Moon, List } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
-const API_URL = 'http://localhost:3001/api/search';
+const API_URL = '/api/search';
 
 // Helper: Format nice date
 const formatTitle = (item) => {
@@ -174,7 +174,7 @@ function App() {
           } else if (selectedYears.length > 0) {
             params.years = selectedYears.join(',');
           }
-          const res = await axios.get('http://localhost:3001/api/shows', { params });
+          const res = await axios.get('/api/shows', { params });
           setAllShows(res.data);
           setIndexStatus(''); // Clear status on success
         } catch (err) {

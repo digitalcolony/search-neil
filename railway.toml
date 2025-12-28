@@ -1,0 +1,13 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm run server-install && npm run build"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/api/search?q=neil"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+
+[env]
+NODE_ENV = "production"
+PORT = "3001"

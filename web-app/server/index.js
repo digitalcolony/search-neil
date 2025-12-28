@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 const TRANSCRIPTS_DIR = path.resolve(__dirname, '../../transcripts/timestamps');
 const DB_PATH = path.resolve(__dirname, 'transcripts.db');
 
@@ -127,7 +127,12 @@ async function buildIndex() {
     VALUES (@date, @file, @type, @youtube_url, @custom_title)
   `);
 
-  const insertMany = db.transaction((docs, shows) => {
+  const insertLink = db.prepare(`
+    INSERT OR REPLACE INTO show_links (date, youtube_url, host, custom_title) 
+    VALUES (?, ?, ?, ?)
+  `);
+
+  const insertMany = db.transaction((docs, shows, links) => {
     for (const doc of docs) {
       insertPorter.run(doc);
       insertTrigram.run(doc);
@@ -135,10 +140,14 @@ async function buildIndex() {
     for (const show of shows) {
       insertShow.run(show);
     }
+    for (const link of links) {
+      insertLink.run(...link);
+    }
   });
 
   let batch = [];
   let showsBatch = [];
+  let linksBatch = [];
 
   for (let i = 0; i < allFiles.length; i++) {
     const fileInfo = allFiles[i];
@@ -205,7 +214,43 @@ async function buildIndex() {
     }
   }
 
-  if (batch.length > 0 || showsBatch.length > 0) insertMany(batch, showsBatch);
+  if (batch.length > 0 || showsBatch.length > 0) insertMany(batch, showsBatch, []);
+
+  // Update show_links from CSV
+  const csvFile = path.resolve(__dirname, 'nrs_shows.csv');
+  if (fs.existsSync(csvFile)) {
+    console.log('Syncing metadata from nrs_shows.csv...');
+    const csvData = fs.readFileSync(csvFile, 'utf8');
+    const lines = csvData.split(/\r?\n/).slice(1);
+    
+    const links = lines.map(line => {
+      const parts = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          if (inQuotes && line[i+1] === '"') { current += '"'; i++; } else { inQuotes = !inQuotes; }
+        } else if (char === ',' && !inQuotes) { parts.push(current); current = ''; } 
+        else { current += char; }
+      }
+      parts.push(current);
+      return parts;
+    }).filter(p => p.length >= 3).map(row => {
+      const [date, init, youtube, notes, info, host, custom_title] = row;
+      const cleanDate = (date || '').replace(/"/g, '').trim();
+      const cleanYoutube = (youtube || '').replace(/"/g, '').trim();
+      const cleanHost = (host || '').replace(/"/g, '').trim();
+      const cleanCustomTitle = (custom_title || '').replace(/"/g, '').trim();
+      return (cleanDate && cleanYoutube && cleanYoutube.startsWith('http')) ? [cleanDate, cleanYoutube, cleanHost, cleanCustomTitle] : null;
+    }).filter(Boolean);
+
+    db.transaction((ls) => {
+      db.exec('DELETE FROM show_links');
+      for (const link of ls) insertLink.run(...link);
+    })(links);
+    console.log(`Synced ${links.length} links.`);
+  }
 
   // Mark complete
   db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v6', 'true');
@@ -277,9 +322,6 @@ app.get('/api/search', (req, res) => {
         finalMatchQuery = `(${expandedParts.join(' OR ')})`;
         
         // ...but only in shows that contain ALL of the terms
-        const intersectQueries = expandedParts.map(p => `SELECT file FROM ${tableName} WHERE ${tableName} MATCH ${db.prepare('?').bind(p).source.replace('?', `'${p}'`)}`);
-        // Note: better-sqlite3 doesn't have a direct way to build this string safely with bindings in a subquery easily
-        // so we will use a set of temp params or just trust FTS match syntax which is already sanitized in expandQuery
         filterSql = ` AND t.file IN (
           ${expandedParts.map(() => `SELECT file FROM ${tableName} WHERE ${tableName} MATCH ?`).join(' INTERSECT ')}
         )`;
@@ -404,6 +446,19 @@ app.get('/api/transcript', (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// Serve static files from React build in production
+if (process.env.NODE_ENV === 'production') {
+  const clientDist = path.resolve(__dirname, '../client-app/dist');
+  app.use(express.static(clientDist));
+  
+  // Handle SPA routing: serve index.html for non-API routes
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api/')) {
+      res.sendFile(path.join(clientDist, 'index.html'));
+    }
+  });
+}
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
 });

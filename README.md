@@ -38,7 +38,18 @@ Search hits are returned with metadata including the file path and line number. 
 - Calculate the timestamp in seconds.
 - Append a time parameter (e.g., `?t=120s`) to the YouTube URL, including a 5-second "lead-in" buffer for context.
 
-## �📂 Project Structure
+## 🚀 Deployment (Railway)
+
+The archive is configured for easy deployment on [Railway](https://railway.app/).
+
+1.  **Connect Repo**: Point Railway to your GitHub repository.
+2.  **Config**: The included `railway.toml` and root `package.json` will automatically:
+    - Install server dependencies.
+    - Build the React frontend.
+    - Serve the app via the backend on the assigned `$PORT`.
+3.  **Persistence**: High-traffic instances should consider using a Railway Volume for the `transcripts.db` to avoid re-indexing on every deploy.
+
+## 📂 Project Structure
 
 - `transcripts/`: The raw data source.
   - `timestamps/`: Daily show transcripts with VTT-style timestamps.
