@@ -10,7 +10,8 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS show_links (
         date TEXT PRIMARY KEY,
         youtube_url TEXT,
-        host TEXT
+        host TEXT,
+        custom_title TEXT
     );
 `);
 console.log("Ensured show_links table exists.");
@@ -21,7 +22,7 @@ const lines = csvData.split(/\r?\n/);
 
 console.log(`Processing ${lines.length - 1} rows...`);
 
-const insertStmt = db.prepare('INSERT OR REPLACE INTO show_links (date, youtube_url, host) VALUES (?, ?, ?)');
+const insertStmt = db.prepare('INSERT OR REPLACE INTO show_links (date, youtube_url, host, custom_title) VALUES (?, ?, ?, ?)');
 
 let count = 0;
 function parseLine(line) {
@@ -51,16 +52,16 @@ function parseLine(line) {
 const transaction = db.transaction((rows) => {
     for (const row of rows) {
         if (row.length < 3) continue;
-        const [date, init, youtube, notes, info, host] = row;
+        const [date, init, youtube, notes, info, host, custom_title] = row;
         // Clean fields
         const cleanDate = date.replace(/"/g, '').trim();
         const cleanYoutube = (youtube || '').replace(/"/g, '').trim();
         const cleanHost = (host || '').replace(/"/g, '').trim();
-        const cleanInit = (init || '').replace(/"/g, '').trim();
+        const cleanCustomTitle = (custom_title || '').replace(/"/g, '').trim();
         
         // We now allow shows even if init isn't "NRS" as long as they have a date and youtube link
         if (cleanDate && cleanYoutube && cleanYoutube.startsWith('http')) {
-            insertStmt.run(cleanDate, cleanYoutube, cleanHost);
+            insertStmt.run(cleanDate, cleanYoutube, cleanHost, cleanCustomTitle);
             count++;
         }
     }

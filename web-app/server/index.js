@@ -38,6 +38,15 @@ function createTables() {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS show_links (
+      date TEXT PRIMARY KEY,
+      youtube_url TEXT,
+      host TEXT,
+      custom_title TEXT
+    );
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY,
       value TEXT
@@ -48,7 +57,7 @@ function createTables() {
 createTables();
 
 function getDateFromFilename(filename) {
-  const match = filename.match(/rogers-(\d{8})/);
+  const match = filename.match(/(?:rogers|lassiter)-(\d{8})/);
   if (match) {
     const d = match[1];
     return `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`;
@@ -56,18 +65,18 @@ function getDateFromFilename(filename) {
   return 'Unknown Date';
 }
 
-// Check if we need to build index (v4 includes Host support and removed shows)
-const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v4');
+// Check if we need to build index (v5 includes Lassiter date fix)
+const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v5');
 let isIndexed = row ? row.value === 'true' : false;
 let indexingProgress = { current: 0, total: 0 };
 
 async function buildIndex() {
   if (isIndexed) {
-      console.log('Database already indexed (v4). Skipping.');
+      console.log('Database already indexed (v5). Skipping.');
       return;
   }
 
-  console.log('Starting SQLite Indexing (v4 with Drop/Recreate)...');
+  console.log('Starting SQLite Indexing (v5 with Drop/Recreate)...');
   
   // Faster than DELETE: DROP and Recreate
   db.exec(`DROP TABLE IF EXISTS transcripts_fts`);
@@ -155,7 +164,7 @@ async function buildIndex() {
   if (batch.length > 0 || showsBatch.length > 0) insertMany(batch, showsBatch);
 
   // Mark complete
-  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v4', 'true');
+  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v5', 'true');
   isIndexed = true;
   console.log('Indexing Complete!');
 }
@@ -235,7 +244,7 @@ app.get('/api/search', (req, res) => {
       let sql = `
         SELECT t.id, t.file, t.line, t.date, t.text_content, 
                snippet(${tableName}, 4, '<b>', '</b>', '...', 64) as highlight,
-               l.youtube_url, l.host
+               l.youtube_url, l.host, l.custom_title
         FROM ${tableName} t
         LEFT JOIN show_links l ON t.date = l.date
         WHERE t.${tableName} MATCH ? 
@@ -301,7 +310,7 @@ app.get('/api/shows', (req, res) => {
   
   try {
     let sql = `
-      SELECT s.date, s.file, l.youtube_url, l.host
+      SELECT s.date, s.file, l.youtube_url, l.host, l.custom_title
       FROM shows s
       LEFT JOIN show_links l ON s.date = l.date
       WHERE 1=1

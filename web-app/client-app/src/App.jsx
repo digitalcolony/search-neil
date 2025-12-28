@@ -11,7 +11,13 @@ const formatTitle = (item) => {
    // item.date is YYYY-MM-DD
    try {
      const dateObj = parseISO(item.date);
-     let title = `Neil Rogers Show (${format(dateObj, 'MMMM d, yyyy')})`;
+     const dateStr = format(dateObj, 'MMMM d, yyyy');
+     
+     if (item.custom_title) {
+       return `${item.custom_title} (${dateStr})`;
+     }
+
+     let title = `Neil Rogers Show (${dateStr})`;
      if (item.host) {
        title += ` hosted by ${item.host}`;
      }
