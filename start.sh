@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 
 # Configuration
 # If DATA_DIR is set (Railway Volume), use it. Otherwise default to app root.

@@ -3,9 +3,9 @@ builder = "NIXPACKS"
 buildCommand = "npm run server-install && npm run build"
 
 [deploy]
-startCommand = "npm start"
+startCommand = "bash start.sh"
 healthcheckPath = "/api/search?q=neil"
-healthcheckTimeout = 100
+healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 
 [env]
