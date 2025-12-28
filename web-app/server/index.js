@@ -81,16 +81,17 @@ function getDateFromFilename(filename) {
   }
   
   // Best Of handler (e.g., 1988.md)
+  // Use Dec 31st to avoid collision with Jan 1st shows
   const yearMatch = filename.match(/^(\d{4})/);
   if (yearMatch) {
-    return `${yearMatch[1]}-01-01`;
+    return `${yearMatch[1]}-12-31`;
   }
 
   return 'Unknown Date';
 }
 
 // Check if we need to build index (v6 includes Best Of support)
-const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v6');
+const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v9');
 let isIndexed = row ? row.value === 'true' : false;
 let indexingProgress = { current: 0, total: 0 };
 
@@ -103,7 +104,7 @@ async function buildIndex() {
       return;
   }
 
-  console.log('Starting SQLite Indexing (v6 with Best Of support)...');
+  console.log('Starting SQLite Indexing (v9 with Best Of support)...');
   
   // Faster than DELETE: DROP and Recreate
   db.exec(`DROP TABLE IF EXISTS transcripts_fts`);
@@ -254,7 +255,8 @@ async function buildIndex() {
       const [date, init, youtube, notes, info, host, custom_title] = row;
       const cleanDate = (date || '').replace(/"/g, '').trim();
       const cleanYoutube = (youtube || '').replace(/"/g, '').trim();
-      const cleanHost = (host || '').replace(/"/g, '').trim();
+      let cleanHost = (host || '').replace(/"/g, '').trim();
+      if (cleanHost.startsWith('http')) cleanHost = ''; // Filter out URLs from host column
       const cleanCustomTitle = (custom_title || '').replace(/"/g, '').trim();
       return (cleanDate && cleanYoutube && cleanYoutube.startsWith('http')) ? [cleanDate, cleanYoutube, cleanHost, cleanCustomTitle] : null;
     }).filter(Boolean);
@@ -267,7 +269,7 @@ async function buildIndex() {
   }
 
   // Mark complete
-  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v6', 'true');
+  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v9', 'true');
   isIndexed = true;
   console.log('Indexing Complete!');
 }
@@ -425,7 +427,7 @@ app.get('/api/shows', (req, res) => {
     let sql = `
       SELECT s.date, s.file, COALESCE(l.youtube_url, s.youtube_url) as youtube_url, l.host, COALESCE(l.custom_title, s.custom_title) as custom_title, s.type
       FROM shows s
-      LEFT JOIN show_links l ON s.date = l.date
+      LEFT JOIN show_links l ON (s.date = l.date AND s.type = 'show')
       WHERE 1=1
     `;
     const params = [];
