@@ -4,11 +4,13 @@ const path = require('path');
 
 const db = new Database('transcripts.db');
 
+db.exec(`DROP TABLE IF EXISTS show_links`);
 // 1. Create show_links table
 db.exec(`
     CREATE TABLE IF NOT EXISTS show_links (
         date TEXT PRIMARY KEY,
-        youtube_url TEXT
+        youtube_url TEXT,
+        host TEXT
     );
 `);
 console.log("Ensured show_links table exists.");
@@ -19,7 +21,7 @@ const lines = csvData.split(/\r?\n/);
 
 console.log(`Processing ${lines.length - 1} rows...`);
 
-const insertStmt = db.prepare('INSERT OR REPLACE INTO show_links (date, youtube_url) VALUES (?, ?)');
+const insertStmt = db.prepare('INSERT OR REPLACE INTO show_links (date, youtube_url, host) VALUES (?, ?, ?)');
 
 let count = 0;
 function parseLine(line) {
@@ -49,14 +51,16 @@ function parseLine(line) {
 const transaction = db.transaction((rows) => {
     for (const row of rows) {
         if (row.length < 3) continue;
-        const [date, init, youtube] = row;
-        // Clean date if it has quotes
+        const [date, init, youtube, notes, info, host] = row;
+        // Clean fields
         const cleanDate = date.replace(/"/g, '').trim();
-        const cleanInit = init.replace(/"/g, '').trim();
-        const cleanYoutube = youtube.replace(/"/g, '').trim();
+        const cleanYoutube = (youtube || '').replace(/"/g, '').trim();
+        const cleanHost = (host || '').replace(/"/g, '').trim();
+        const cleanInit = (init || '').replace(/"/g, '').trim();
         
-        if (cleanInit === 'NRS' && cleanYoutube && cleanYoutube.startsWith('http')) {
-            insertStmt.run(cleanDate, cleanYoutube);
+        // We now allow shows even if init isn't "NRS" as long as they have a date and youtube link
+        if (cleanDate && cleanYoutube && cleanYoutube.startsWith('http')) {
+            insertStmt.run(cleanDate, cleanYoutube, cleanHost);
             count++;
         }
     }

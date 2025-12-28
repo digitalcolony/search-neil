@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './index.css';
-import { Radio, Search, Calendar, X, Youtube, Play, Sun, Moon } from 'lucide-react';
+import { Radio, Search, Calendar, X, Youtube, Play, Sun, Moon, List } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const API_URL = 'http://localhost:3001/api/search';
@@ -11,7 +11,11 @@ const formatTitle = (item) => {
    // item.date is YYYY-MM-DD
    try {
      const dateObj = parseISO(item.date);
-     return `Neil Rogers Show (${format(dateObj, 'MMMM d, yyyy')})`;
+     let title = `Neil Rogers Show (${format(dateObj, 'MMMM d, yyyy')})`;
+     if (item.host) {
+       title += ` hosted by ${item.host}`;
+     }
+     return title;
    } catch (e) {
      return item.file;
    }
@@ -34,6 +38,9 @@ function App() {
   const [retryTick, setRetryTick] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  const [activeTab, setActiveTab] = useState('search'); // 'search' or 'shows'
+  const [allShows, setAllShows] = useState([]);
+  const [loadingShows, setLoadingShows] = useState(false);
   
   const searchTimeout = useRef(null);
 
@@ -123,6 +130,38 @@ function App() {
         controller.abort();
     };
   }, [query, selectedYears, retryTick]);
+
+  // Fetch all shows for the "Show List" tab
+  useEffect(() => {
+    if (activeTab === 'shows') {
+      const fetchShows = async () => {
+        setLoadingShows(true);
+        try {
+          const params = {};
+          if (selectedYears.length > 0) params.years = selectedYears.join(',');
+          const res = await axios.get('http://localhost:3001/api/shows', { params });
+          setAllShows(res.data);
+          setIndexStatus(''); // Clear status on success
+        } catch (err) {
+          if (err.response && err.response.status === 503) {
+            const progress = err.response.data.progress;
+            setAllShows([]);
+            setIndexStatus(`Indexing database... ${progress}% complete`);
+            
+            // Retry after 2s
+            setTimeout(() => {
+              fetchShows();
+            }, 2000);
+          } else {
+            console.error("Failed to fetch shows", err);
+          }
+        } finally {
+          setLoadingShows(false);
+        }
+      };
+      fetchShows();
+    }
+  }, [activeTab, selectedYears]);
 
   // Helper: Convert HH:MM:SS.ms to seconds
   const tsToSec = (ts) => {
@@ -215,30 +254,32 @@ function App() {
         </header>
         
         <div className="controls">
-          <div style={{position: 'relative'}}>
-            <input 
-              type="text" 
-              className="search-bar" 
-              placeholder="Search transcripts (e.g., 'Rick and Suds', 'Al Goldstein')..." 
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              autoFocus
-            />
-            {query ? (
-               <X 
-                 onClick={() => setQuery('')}
-                 style={{
-                   position:'absolute', 
-                   right:'15px', 
-                   top:'15px', 
-                   color:'var(--text-dim)', 
-                   cursor: 'pointer'
-                 }} 
-               />
-            ) : (
-               <Search style={{position:'absolute', right:'15px', top:'15px', color:'var(--text-dim)'}} />
-            )}
-          </div>
+          {activeTab === 'search' && (
+            <div style={{position: 'relative'}}>
+              <input 
+                type="text" 
+                className="search-bar" 
+                placeholder="Search transcripts (e.g., 'Rick and Suds', 'Al Goldstein')..." 
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                autoFocus
+              />
+              {query ? (
+                 <X 
+                   onClick={() => setQuery('')}
+                   style={{
+                     position:'absolute', 
+                     right:'15px', 
+                     top:'15px', 
+                     color:'var(--text-dim)', 
+                     cursor: 'pointer'
+                   }} 
+                 />
+              ) : (
+                 <Search style={{position:'absolute', right:'15px', top:'15px', color:'var(--text-dim)'}} />
+              )}
+            </div>
+          )}
   
           <div className="timeline">
             <div 
@@ -266,8 +307,23 @@ function App() {
             ))}
           </div>
         </div>
+
+        <div className="tabs">
+          <button 
+            className={`tab-button ${activeTab === 'search' ? 'active' : ''}`}
+            onClick={() => setActiveTab('search')}
+          >
+            <Search size={18} style={{marginRight: '8px'}} /> SEARCH
+          </button>
+          <button 
+            className={`tab-button ${activeTab === 'shows' ? 'active' : ''}`}
+            onClick={() => setActiveTab('shows')}
+          >
+            <List size={18} style={{marginRight: '8px'}} /> SHOW LIST
+          </button>
+        </div>
         
-        {!loading && !indexStatus && query && (
+        {activeTab === 'search' && !loading && !indexStatus && query && (
           <div style={{
             textAlign: 'center', 
             marginBottom: '0.5rem', 
@@ -279,73 +335,115 @@ function App() {
             FOUND {results.length}{hasMore ? '+' : ''} SEGMENTS IN {(searchTime/1000).toFixed(2)}s
           </div>
         )}
+
+        {activeTab === 'shows' && !loadingShows && (
+          <div style={{
+            textAlign: 'center', 
+            marginBottom: '0.5rem', 
+            color: 'var(--text-dim)', 
+            fontSize: '0.75rem', 
+            fontFamily: 'var(--font-mono)',
+            textTransform: 'uppercase'
+          }}>
+            LISTING {allShows.length} SHOWS
+          </div>
+        )}
+
       </div>
 
       <main>
-        {loading && <div className="loading-indicator">TUNING IN...</div>}
+        {activeTab === 'search' ? (
+          <>
+            {loading && <div className="loading-indicator">TUNING IN...</div>}
 
-        {indexStatus && (
-          <div style={{textAlign:'center', padding:'2rem', color:'var(--accent-color)', fontFamily:'var(--font-mono)'}}>
-             <Calendar size={16} style={{display:'inline', marginRight:'8px'}}/>
-             {indexStatus}
+            {indexStatus && (
+              <div style={{textAlign:'center', padding:'2rem', color:'var(--accent-color)', fontFamily:'var(--font-mono)'}}>
+                 <Calendar size={16} style={{display:'inline', marginRight:'8px'}}/>
+                 {indexStatus}
+              </div>
+            )}
+
+            <div className="results-grid">
+              {results.map((item) => (
+                <div key={item.id} className="result-card">
+                  <div className="result-header">
+                    <span className="result-date">
+                      <Radio size={14} style={{display:'inline', marginRight:'5px'}}/>
+                      {formatTitle(item)}
+                    </span>
+                    {item.youtube_url && (
+                      <a 
+                        href={item.youtube_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="youtube-link"
+                        title="Watch on YouTube"
+                      >
+                        <Youtube size={16} style={{marginRight: '4px'}} />
+                        <span style={{fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'var(--font-mono)'}}>WATCH</span>
+                      </a>
+                    )}
+                  </div>
+                  <div className="result-content">
+                    {highlightText(item.snippet || item.text || "", query, item.youtube_url)}
+                  </div>
+                </div>
+              ))}
+              
+              {!loading && query && results.length === 0 && (
+                 <div style={{textAlign:'center', padding:'2rem', color:'var(--text-dim)'}}>
+                   NO SIGNAL FOUND. TRY ADJUSTING YOUR FREQUENCY.
+                 </div>
+              )}
+
+              {hasMore && !loading && (
+                 <button 
+                   onClick={loadMore}
+                   className="load-more-btn"
+                 >
+                   Load More Transcripts
+                 </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="show-list">
+            {indexStatus && (
+              <div style={{textAlign:'center', padding:'2rem', color:'var(--accent-color)', fontFamily:'var(--font-mono)'}}>
+                 <Calendar size={16} style={{display:'inline', marginRight:'8px'}}/>
+                 {indexStatus}
+              </div>
+            )}
+
+            {loadingShows ? (
+              <div className="loading-indicator">GATHERING LOGS...</div>
+            ) : (
+              <div className="shows-grid">
+                {allShows.map((show, idx) => (
+                  <div key={idx} className="show-item">
+                    <div className="show-item-info">
+                      <Radio size={14} className="show-icon" />
+                      <span className="show-item-title">{formatTitle(show)}</span>
+                    </div>
+                    {show.youtube_url && (
+                      <a 
+                        href={show.youtube_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="youtube-link"
+                      >
+                        <Youtube size={16} style={{marginRight: '4px'}} />
+                        <span style={{fontSize: '0.7rem'}}>WATCH</span>
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
-        
-
-
-        <div className="results-grid">
-          {results.map((item) => (
-            <div key={item.id} className="result-card">
-              <div className="result-header">
-                <span className="result-date">
-                  <Radio size={14} style={{display:'inline', marginRight:'5px'}}/>
-                  {formatTitle(item)}
-                </span>
-                {item.youtube_url && (
-                  <a 
-                    href={item.youtube_url} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className="youtube-link"
-                    title="Watch on YouTube"
-                  >
-                    <Youtube size={16} style={{marginRight: '4px'}} />
-                    <span style={{fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'var(--font-mono)'}}>WATCH</span>
-                  </a>
-                )}
-              </div>
-              <div className="result-content">
-                {highlightText(item.snippet || item.text || "", query, item.youtube_url)}
-              </div>
-            </div>
-          ))}
-          
-          {!loading && query && results.length === 0 && (
-             <div style={{textAlign:'center', padding:'2rem', color:'var(--text-dim)'}}>
-               NO SIGNAL FOUND. TRY ADJUSTING YOUR FREQUENCY.
-             </div>
-          )}
-
-          {hasMore && !loading && (
-             <button 
-               onClick={loadMore}
-               style={{
-                 width: '100%',
-                 padding: '1rem',
-                 background: 'var(--panel-bg)',
-                 border: '1px dashed var(--accent-color)',
-                 color: 'var(--accent-color)',
-                 fontFamily: 'var(--font-mono)',
-                 cursor: 'pointer',
-                 marginTop: '1rem',
-                 textTransform: 'uppercase'
-               }}
-             >
-               Load More Transcripts
-             </button>
-          )}
-        </div>
       </main>
+
     </div>
   );
 }

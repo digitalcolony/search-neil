@@ -16,37 +16,36 @@ const DB_PATH = path.resolve(__dirname, 'transcripts.db');
 // Initialize DB
 const db = new Database(DB_PATH);
 
-// Create Table using FTS5 (Full Text Search) for super fast searching
-db.exec(`
-  CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
-    id, 
-    file, 
-    line, 
-    date, 
-    text_content, 
-    tokenize="porter"
-  );
-`);
+// Create Table structure
+function createTables() {
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
+      id, file, line, date, text_content, tokenize="porter"
+    );
+  `);
 
-// Create Trigram Table for Fuzzy Search (handles typos like goldstien vs goldstein)
-db.exec(`
-  CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts_trigram USING fts5(
-    id, 
-    file, 
-    line, 
-    date, 
-    text_content, 
-    tokenize="trigram"
-  );
-`);
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts_trigram USING fts5(
+      id, file, line, date, text_content, tokenize="trigram"
+    );
+  `);
 
-// Simple KV for tracking if we have indexed or not
-db.exec(`
-  CREATE TABLE IF NOT EXISTS metadata (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  );
-`);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS shows (
+      date TEXT PRIMARY KEY,
+      file TEXT
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `);
+}
+
+createTables();
 
 function getDateFromFilename(filename) {
   const match = filename.match(/rogers-(\d{8})/);
@@ -57,22 +56,24 @@ function getDateFromFilename(filename) {
   return 'Unknown Date';
 }
 
-// Check if we need to build index (v2 includes trigram fuzzy search)
-const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v2');
+// Check if we need to build index (v4 includes Host support and removed shows)
+const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get('is_indexed_v4');
 let isIndexed = row ? row.value === 'true' : false;
 let indexingProgress = { current: 0, total: 0 };
 
 async function buildIndex() {
   if (isIndexed) {
-      console.log('Database already indexed (v2). Skipping.');
+      console.log('Database already indexed (v4). Skipping.');
       return;
   }
 
-  console.log('Starting SQLite Indexing (v2 with Fuzzy Search)...');
+  console.log('Starting SQLite Indexing (v4 with Drop/Recreate)...');
   
-  // Clear old data to ensure consistency across both tables
-  db.prepare('DELETE FROM transcripts_fts').run();
-  db.prepare('DELETE FROM transcripts_fts_trigram').run();
+  // Faster than DELETE: DROP and Recreate
+  db.exec(`DROP TABLE IF EXISTS transcripts_fts`);
+  db.exec(`DROP TABLE IF EXISTS transcripts_fts_trigram`);
+  db.exec(`DROP TABLE IF EXISTS shows`);
+  createTables();
 
   const files = await glob(TRANSCRIPTS_DIR + '/**/*.txt');
   console.log(`Found ${files.length} transcripts to ingest.`);
@@ -88,14 +89,22 @@ async function buildIndex() {
     VALUES (@id, @file, @line, @date, @text_content)
   `);
 
-  const insertMany = db.transaction((docs) => {
+  const insertShow = db.prepare(`
+    INSERT OR IGNORE INTO shows (date, file) VALUES (@date, @file)
+  `);
+
+  const insertMany = db.transaction((docs, shows) => {
     for (const doc of docs) {
       insertPorter.run(doc);
       insertTrigram.run(doc);
     }
+    for (const show of shows) {
+      insertShow.run(show);
+    }
   });
 
   let batch = [];
+  let showsBatch = [];
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -109,6 +118,9 @@ async function buildIndex() {
     const filename = path.basename(file);
     const date = getDateFromFilename(filename);
     const relativePath = path.relative(TRANSCRIPTS_DIR, file);
+
+    // Track the show for the optimized list
+    showsBatch.push({ date, file: relativePath });
 
     let currentDoc = null;
 
@@ -132,17 +144,18 @@ async function buildIndex() {
     if (currentDoc) batch.push(currentDoc);
 
     // Commit every 50 files
-    if (batch.length > 2000) {
-      insertMany(batch);
+    if (showsBatch.length >= 50) {
+      insertMany(batch, showsBatch);
       console.log(`Indexed ${i} / ${files.length} files...`);
       batch = [];
+      showsBatch = [];
     }
   }
 
-  if (batch.length > 0) insertMany(batch);
+  if (batch.length > 0 || showsBatch.length > 0) insertMany(batch, showsBatch);
 
   // Mark complete
-  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v2', 'true');
+  db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run('is_indexed_v4', 'true');
   isIndexed = true;
   console.log('Indexing Complete!');
 }
@@ -222,7 +235,7 @@ app.get('/api/search', (req, res) => {
       let sql = `
         SELECT t.id, t.file, t.line, t.date, t.text_content, 
                snippet(${tableName}, 4, '<b>', '</b>', '...', 64) as highlight,
-               l.youtube_url
+               l.youtube_url, l.host
         FROM ${tableName} t
         LEFT JOIN show_links l ON t.date = l.date
         WHERE t.${tableName} MATCH ? 
@@ -274,6 +287,37 @@ app.get('/api/search', (req, res) => {
 
     res.json(enriched);
 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/shows', (req, res) => {
+  const yearsParam = req.query.years;
+  if (!isIndexed) return res.status(503).json({ error: 'Indexing', progress:  Math.round((indexingProgress.current / indexingProgress.total) * 100)});
+  
+  console.log(`[API] Fetching shows for years: ${yearsParam || 'ALL'}`);
+  
+  try {
+    let sql = `
+      SELECT s.date, s.file, l.youtube_url, l.host
+      FROM shows s
+      LEFT JOIN show_links l ON s.date = l.date
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (yearsParam) {
+      const years = yearsParam.split(',');
+      const yearPlaceholders = years.map(() => "s.date LIKE ?").join(' OR ');
+      sql += ` AND (${yearPlaceholders}) `;
+      years.forEach(y => params.push(`${y}%`));
+    }
+
+    sql += ` ORDER BY s.date ASC`;
+    const results = db.prepare(sql).all(...params);
+    res.json(results);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

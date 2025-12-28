@@ -1,0 +1,15 @@
+Shows without YouTube links:
+
+- 1987-10-15 [File: neil-rogers-show-1987\rogers-19871015-short_base.txt]
+- 1987-12-21 [File: neil-rogers-show-1987\rogers-19871221-trim_base.txt]
+- 1987-12-22 [File: neil-rogers-show-1987\rogers-19871222-trim_base.txt]
+- 1989-06-30 [File: neil-rogers-show-1989\rogers-19890630-trim_base.txt]
+- 1989-07-10 [File: neil-rogers-show-1989\rogers-19890710-trim_base.txt]
+- 1989-08-26 [File: neil-rogers-show-1989\rogers-19890826-trim-cleaned-32-38_base.txt]
+- 1989-11-29 [File: neil-rogers-show-1989\rogers-19891129-trim-glen_base.txt]
+- 1990-06-26 [File: neil-rogers-show-1990\rogers-19900626-trim-stan_base.txt]
+- 2005-12-20 [File: neil-rogers-show-2005\rogers-20051220-trim_base.txt]
+- 2006-03-08 [File: neil-rogers-show-2006\rogers-20060308-trim_base.txt]
+- 2007-06-15 [File: neil-rogers-show-2007\rogers-20070615-trim_base.txt]
+- 2007-07-02 [File: neil-rogers-show-2007\rogers-20070702-trim_base.txt]
+- Unknown Date [File: neil-rogers-show-1993\lassiter-19930611-trim-neil-wsun_base.txt]
