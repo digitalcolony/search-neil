@@ -21,4 +21,4 @@ else
 fi
 
 # Run the app
-npm start
+NODE_ENV=production node web-app/server/index.js

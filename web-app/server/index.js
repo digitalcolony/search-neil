@@ -119,7 +119,7 @@ async function buildIndex() {
   ];
 
   if (allFiles.length === 0) {
-    console.error(`[CRITICAL] No transcripts found in ${TRANSCRIPTS_DIR} or ${bestOfDir}. Check your deployment.`);
+    console.error(`[CRITICAL] No transcripts found in ${TRANSCRIPTS_DIR} or ${BEST_OF_DIR}. Check your deployment.`);
   }
 
   console.log(`Found ${files.length} shows and ${bestOfFiles.length} best-of files to ingest.`);

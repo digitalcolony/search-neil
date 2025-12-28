@@ -6,6 +6,6 @@
         "install:all": "npm install --prefix web-app/server && npm install --prefix web-app/client-app",
         "build": "cd web-app/client-app && npm install && npm run build",
         "server-install": "cd web-app/server && npm install",
-        "start": "NODE_ENV=production node web-app/server/index.js"
+        "start": "bash start.sh"
     }
 }
