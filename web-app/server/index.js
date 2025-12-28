@@ -1,4 +1,5 @@
 const express = require('express');
+console.log('[NODE] PROCESS STARTED');
 const cors = require('cors');
 const { glob } = require('glob');
 const fs = require('fs');
@@ -220,7 +221,7 @@ async function buildIndex() {
     }
 
     if (showsBatch.length >= 50) {
-      insertMany(batch, showsBatch);
+      insertMany(batch, showsBatch, []);
       console.log(`Indexed ${i + 1} / ${allFiles.length} files...`);
       batch = [];
       showsBatch = [];
