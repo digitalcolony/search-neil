@@ -317,11 +317,17 @@ app.get('/api/search', (req, res) => {
   const limit = 100;
 
   if (!isIndexed) return res.status(503).json({ error: 'Indexing', progress:  Math.round((indexingProgress.current / indexingProgress.total) * 100)});
-  if (!query) return res.json([]);
+  if (!query || !query.trim()) return res.json([]);
 
   try {
     const isVerbatim = query.startsWith('"') && query.endsWith('"');
     const expandedQuery = expandQuery(query);
+    
+    // Validate expanded query to prevent FTS5 syntax errors
+    const cleanedQuery = expandedQuery.replace(/["()]/g, '').trim();
+    if (!cleanedQuery || cleanedQuery.length === 0) {
+      return res.json([]);
+    }
     
     // Check for show-wide AND operator
     const isAndSearch = expandedQuery.toUpperCase().includes(' AND ');
@@ -383,7 +389,13 @@ app.get('/api/search', (req, res) => {
     };
 
     // 1. Try Exact/Porter search first
-    let results = getSearchResults('transcripts_fts', expandedQuery, yearsParam, offset);
+    let results = [];
+    try {
+      results = getSearchResults('transcripts_fts', expandedQuery, yearsParam, offset);
+    } catch (ftsError) {
+      console.error('[FTS5 ERROR] Query failed:', { query, expandedQuery, error: ftsError.message });
+      return res.json([]);
+    }
 
     // 2. Fallback to Fuzzy/Trigram ONLY if verbatim search is NOT used AND exact results were 0
     // This prevents "Elian" from matching "reliance" when exact hits for Elian exist.
