@@ -297,9 +297,11 @@ async function buildIndex() {
 	console.log("Indexing Complete!");
 }
 
-// Start background indexing if needed
+// Start background indexing if needed (non-blocking)
 if (!isIndexed) {
-	buildIndex();
+	buildIndex().catch((err) => {
+		console.error("[INDEXING ERROR]", err);
+	});
 }
 
 app.get("/api/status", (req, res) => {
@@ -557,6 +559,10 @@ if (process.env.NODE_ENV === "production") {
 	});
 }
 
+// Start server immediately (don't wait for indexing)
 app.listen(PORT, "0.0.0.0", () => {
 	console.log(`Server running on port ${PORT}`);
+	console.log(
+		`Indexing status: ${isIndexed ? "Complete" : "In Progress - check /api/status for progress"}`
+	);
 });
