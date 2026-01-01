@@ -307,6 +307,34 @@ app.get("/api/status", (req, res) => {
 	});
 });
 
+// Audio drops endpoint
+app.get("/api/drops", (req, res) => {
+	const query = req.query.q || "";
+
+	try {
+		const dropsFile = path.resolve(__dirname, "audio_drops.json");
+		const dropsData = JSON.parse(fs.readFileSync(dropsFile, "utf-8"));
+
+		if (!query.trim()) {
+			// Return all drops if no search query
+			return res.json(dropsData.files);
+		}
+
+		// Search in name and artist fields
+		const searchTerm = query.toLowerCase();
+		const filtered = dropsData.files.filter((drop) => {
+			const nameMatch = drop.name.toLowerCase().includes(searchTerm);
+			const artistMatch = drop.artist.toLowerCase().includes(searchTerm);
+			return nameMatch || artistMatch;
+		});
+
+		res.json(filtered);
+	} catch (err) {
+		console.error("Error reading audio drops:", err);
+		res.status(500).json({ error: err.message });
+	}
+});
+
 const NEIL_THESAURUS = {
 	jorge: ["jorge", "george"],
 	george: ["jorge", "george"],
