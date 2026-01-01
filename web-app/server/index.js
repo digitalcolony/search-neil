@@ -297,13 +297,6 @@ async function buildIndex() {
 	console.log("Indexing Complete!");
 }
 
-// Start background indexing if needed (non-blocking)
-if (!isIndexed) {
-	buildIndex().catch((err) => {
-		console.error("[INDEXING ERROR]", err);
-	});
-}
-
 app.get("/api/status", (req, res) => {
 	res.json({
 		ready: isIndexed,
@@ -565,4 +558,13 @@ app.listen(PORT, "0.0.0.0", () => {
 	console.log(
 		`Indexing status: ${isIndexed ? "Complete" : "In Progress - check /api/status for progress"}`
 	);
+
+	// Start background indexing AFTER server is listening
+	if (!isIndexed) {
+		setImmediate(() => {
+			buildIndex().catch((err) => {
+				console.error("[INDEXING ERROR]", err);
+			});
+		});
+	}
 });
